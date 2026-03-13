@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SQL Server Wait Statistics</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="background"></div>
+    <main class="dashboard">
+      <header class="hero shell">
+        <div>
+          <p class="eyebrow">SQL Server Observability</p>
+          <h1>SQL Server Control Center</h1>
+          <p class="subtitle">
+            Monitor waits, blocking, query activity, and server health from a single SQL Server dashboard.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button class="nav-chip active" data-view="dashboardView">Dashboard</button>
+          <button class="nav-chip" data-view="connectionsView">Connections</button>
+        </div>
+      </header>
+
+      <section class="connection-strip card">
+        <div>
+          <span class="strip-label">Active connection</span>
+          <strong id="activeConnectionName">No connection selected</strong>
+          <p id="activeConnectionMeta" class="strip-meta">
+            Create or select a SQL Server connection.
+          </p>
+        </div>
+        <div class="strip-actions">
+          <label class="select-shell">
+            <span>Database</span>
+            <select id="databaseSelector">
+              <option value=""></option>
+            </select>
+          </label>
+          <label class="select-shell">
+            <span>Refresh</span>
+            <select id="refreshIntervalSelector">
+              <option value="0">Off</option>
+              <option value="5000">5 sec</option>
+              <option value="10000">10 sec</option>
+              <option value="30000" selected>30 sec</option>
+              <option value="60000">1 min</option>
+              <option value="300000">5 min</option>
+              <option value="900000">15 min</option>
+            </select>
+          </label>
+          <button id="refreshDashboardButton" class="action-button">Refresh now</button>
+          <button id="openConnectionsButton" class="action-button ghost">Manage connections</button>
+        </div>
+      </section>
+
+      <section id="dashboardView" class="view active">
+        <header class="hero">
+          <div>
+            <p class="eyebrow">Wait Dashboard</p>
+            <h2 class="view-title">Live Wait Statistics</h2>
+            <p class="subtitle">
+              Cumulative waits from <code>sys.dm_os_wait_stats</code> with live
+              request waits from <code>sys.dm_exec_requests</code>.
+            </p>
+            <p id="scopeHint" class="strip-meta">
+              Server-wide cumulative waits. Active waits reflect the selected database scope.
+            </p>
+          </div>
+          <div class="hero-meta">
+            <div class="meta-card card">
+              <span>Last refresh</span>
+              <strong id="generatedAt">-</strong>
+            </div>
+            <div class="meta-card card">
+              <span>SQL Server start</span>
+              <strong id="startTime">-</strong>
+            </div>
+          </div>
+        </header>
+
+        <section id="dashboardNotice" class="notice hidden"></section>
+
+        <section class="summary-grid">
+          <article class="card stat-card">
+            <span>Cumulative wait time</span>
+            <strong id="totalWait">-</strong>
+          </article>
+          <article class="card stat-card">
+            <span>Total waiting tasks</span>
+            <strong id="totalTasks">-</strong>
+          </article>
+          <article class="card stat-card">
+            <span>Signal wait %</span>
+            <strong id="signalPct">-</strong>
+          </article>
+          <article class="card stat-card signal-card" id="cpuPressureCard">
+            <span>CPU pressure</span>
+            <strong id="cpuPressure">Normal</strong>
+          </article>
+        </section>
+
+        <section class="summary-grid infra-grid">
+          <article class="card stat-card">
+            <span>SQL CPU</span>
+            <strong id="sqlCpuPct">-</strong>
+          </article>
+          <article class="card stat-card">
+            <span>Memory utilization</span>
+            <strong id="memoryUtilPct">-</strong>
+          </article>
+          <article class="card stat-card">
+            <span>Network sent/sec</span>
+            <strong id="networkSent">-</strong>
+          </article>
+          <article class="card stat-card">
+            <span>DB size</span>
+            <strong id="databaseSize">-</strong>
+          </article>
+        </section>
+
+        <section class="main-grid">
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>Wait Distribution</h2>
+              <span>CPU / I/O / Memory / Other</span>
+            </div>
+            <div class="distribution-wrap">
+              <div class="donut" id="categoryDonut"></div>
+              <div class="legend" id="categoryLegend"></div>
+            </div>
+          </article>
+
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>Signal vs Resource</h2>
+              <span>Scheduler pressure indicator</span>
+            </div>
+            <div class="stacked-bar">
+              <div class="segment signal" id="signalBar"></div>
+              <div class="segment resource" id="resourceBar"></div>
+            </div>
+            <div class="split-metrics">
+              <div>
+                <span>Signal waits</span>
+                <strong id="signalWaitTime">-</strong>
+              </div>
+              <div>
+                <span>Resource waits</span>
+                <strong id="resourceWaitTime">-</strong>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>Top Wait Types</h2>
+              <span>Sorted by cumulative wait time</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Wait Type</th>
+                    <th>Category</th>
+                    <th>Total</th>
+                    <th>Avg / Task</th>
+                    <th>Tasks</th>
+                    <th>%</th>
+                  </tr>
+                </thead>
+                <tbody id="topWaitsBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>Active Waits</h2>
+              <span>Live from executing requests</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Session</th>
+                    <th>Wait Type</th>
+                    <th>Category</th>
+                    <th>Wait</th>
+                    <th>CPU</th>
+                    <th>Blocking</th>
+                    <th>Statement</th>
+                  </tr>
+                </thead>
+                <tbody id="activeWaitsBody"></tbody>
+              </table>
+            </div>
+
+            <div class="panel-subsection">
+              <div class="panel-header">
+                <h2>Blocking Sessions</h2>
+                <span>Blocked requests in current scope</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Blocked</th>
+                      <th>Blocker</th>
+                      <th>Database</th>
+                      <th>Wait Type</th>
+                      <th>Wait</th>
+                      <th>Blocked Status</th>
+                      <th>Blocker Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="blockingBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="single-panel">
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>Long Running Queries</h2>
+              <span>Query stats ranked by average duration</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Database</th>
+                    <th>Exec Count</th>
+                    <th>DurationTimeAvg</th>
+                    <th>LogicalReadsAvg</th>
+                    <th>Statement (50)</th>
+                  </tr>
+                </thead>
+                <tbody id="longRunningBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="recommendations card panel">
+          <div class="panel-header">
+            <h2>Recommendations</h2>
+            <span>Pattern-based guidance</span>
+          </div>
+          <div id="recommendationList" class="recommendation-list"></div>
+        </section>
+      </section>
+
+      <section id="connectionsView" class="view">
+        <header class="hero">
+          <div>
+            <p class="eyebrow">Connection Studio</p>
+            <h2 class="view-title">SQL Server Connections</h2>
+            <p class="subtitle">
+              Register instances, switch active targets, and validate access
+              before querying DMVs.
+            </p>
+          </div>
+        </header>
+
+        <section class="connections-grid">
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>Saved Connections</h2>
+              <span>Choose the server used by the dashboard</span>
+            </div>
+            <div id="connectionList" class="connection-list"></div>
+          </article>
+
+          <article class="card panel">
+            <div class="panel-header">
+              <h2 id="formTitle">New Connection</h2>
+              <span>Save SQL auth or full connection string</span>
+            </div>
+            <form id="connectionForm" class="connection-form">
+              <input type="hidden" id="connectionId" />
+
+              <label>
+                <span>Name</span>
+                <input id="name" name="name" type="text" placeholder="Production OLTP" required />
+              </label>
+
+              <div class="form-grid">
+                <label>
+                  <span>Server</span>
+                  <input id="server" name="server" type="text" placeholder="sql01.company.local" />
+                </label>
+                <label>
+                  <span>Port</span>
+                  <input id="port" name="port" type="number" value="1433" />
+                </label>
+              </div>
+
+              <div class="form-grid">
+                <label>
+                  <span>Authentication</span>
+                  <select id="authType" name="authType">
+                    <option value="sql">SQL Server Authentication</option>
+                    <option value="windows">Windows / Trusted</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Username</span>
+                  <input id="username" name="username" type="text" placeholder="sa" />
+                </label>
+              </div>
+
+              <p id="authHint" class="strip-meta">
+                SQL authentication is selected. Username and password will be sent to SQL Server.
+              </p>
+
+              <label>
+                <span>Password</span>
+                <input id="password" name="password" type="password" placeholder="Password" />
+              </label>
+
+              <label>
+                <span>Connection String</span>
+                <textarea
+                  id="connectionString"
+                  name="connectionString"
+                  rows="4"
+                  placeholder="Optional. If provided, server/user/database fields are ignored."
+                ></textarea>
+              </label>
+
+              <div class="toggle-row">
+                <label class="toggle">
+                  <input id="encrypt" name="encrypt" type="checkbox" />
+                  <span>Encrypt</span>
+                </label>
+                <label class="toggle">
+                  <input id="trustServerCertificate" name="trustServerCertificate" type="checkbox" checked />
+                  <span>Trust server certificate</span>
+                </label>
+              </div>
+
+              <div class="form-actions">
+                <button type="button" id="testConnectionButton" class="action-button ghost">Test</button>
+                <button type="button" id="resetFormButton" class="action-button ghost">Reset</button>
+                <button type="submit" class="action-button">Save connection</button>
+              </div>
+            </form>
+
+            <section class="test-result card subtle" id="testResult">
+              <span class="strip-label">Validation</span>
+              <strong id="testStatus">Not tested</strong>
+              <p id="testDetail" class="strip-meta">
+                Run a connection test before saving if you want to verify access.
+              </p>
+            </section>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="queryModal" class="query-modal">
+      <div class="query-modal-head">
+        <div>
+          <span class="strip-label">Query Text</span>
+          <strong id="queryModalTitle">SQL ID</strong>
+        </div>
+        <button id="closeQueryModalButton" class="mini-button" type="button">Close</button>
+      </div>
+      <pre id="queryModalBody" class="query-modal-body"></pre>
+    </dialog>
+
+    <script src="/app.js"></script>
+  </body>
+  </html>
