@@ -1,21 +1,20 @@
-# SQL Server Wait Statistics Dashboard
+# SQL Server Control Center
 
-Single-page dashboard for SQL Server wait analysis using:
-
-- `sys.dm_os_wait_stats` for cumulative waits since last restart
-- `sys.dm_exec_requests` for active waits
+Operational dashboard for SQL Server wait analysis, query activity, blocking, and server health.
 
 ## Features
 
 - Wait categories: CPU, I/O, Memory, Other
-- Cumulative wait time since SQL Server start
-- Top wait types with average wait per task
-- Active waits table
-- Wait distribution chart
-- Signal vs resource wait split
-- Pattern-based recommendations
-- Auto-refresh every 5 seconds
-- CPU pressure highlight when signal waits exceed 25%
+- Cumulative wait time since last restart
+- Top wait types with clickable wait details
+- Active waits and blocking sessions
+- Expensive queries with average duration, CPU, reads, and writes
+- Wait distribution and signal vs resource charts
+- Database size and server utilization cards
+- Auto-refresh selector with `Off`, seconds, and minutes
+- CSV export of the current dashboard dataset
+- Pattern-based recommendations with CPU pressure warning when signal waits exceed 25%
+- Connection management for SQL Server instances
 
 ## Run
 
@@ -25,7 +24,7 @@ Single-page dashboard for SQL Server wait analysis using:
 npm install
 ```
 
-2. Configure environment variables using `.env.example`.
+2. Configure environment variables from `.env.example`.
 
 3. Start the server:
 
@@ -33,9 +32,17 @@ npm install
 npm start
 ```
 
-4. Open `http://localhost:3000`
+4. Open `http://127.0.0.1:3000`
+
+## Endpoints
+
+- `GET /healthz` returns a simple health payload
+- `GET /api/waits` returns the dashboard dataset
+- `GET /api/databases` lists databases for the selected server connection
 
 ## Notes
 
-- The dashboard excludes common benign idle waits to keep the top waits meaningful.
-- `VIEW SERVER STATE` permission is required to query these DMVs.
+- The app binds to `127.0.0.1` by default.
+- `VIEW SERVER STATE` permission is required to query wait and request DMVs.
+- Windows Authentication support is intended for Windows hosts.
+- Wait statistics are cumulative since the last SQL Server restart unless a history store is added.

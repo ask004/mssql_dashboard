@@ -257,9 +257,12 @@ const waitQuery = `
   SELECT TOP (10)
     CONVERT(varchar(128), qs.sql_handle, 2) AS sql_id,
     DB_NAME(CONVERT(int, pa.value)) AS database_name,
+    qs.last_execution_time,
     qs.execution_count,
     CAST((qs.total_elapsed_time * 1.0 / NULLIF(qs.execution_count, 0)) / 1000.0 AS decimal(18, 2)) AS duration_time_avg_ms,
+    CAST((qs.total_worker_time * 1.0 / NULLIF(qs.execution_count, 0)) / 1000.0 AS decimal(18, 2)) AS cpu_time_avg_ms,
     CAST((qs.total_logical_reads * 1.0 / NULLIF(qs.execution_count, 0)) AS decimal(18, 2)) AS logical_reads_avg,
+    CAST((qs.total_logical_writes * 1.0 / NULLIF(qs.execution_count, 0)) AS decimal(18, 2)) AS logical_writes_avg,
     LEFT(LTRIM(RTRIM(SUBSTRING(
       st.text,
       (qs.statement_start_offset / 2) + 1,
@@ -838,6 +841,13 @@ app.get("/api/connections", (_req, res) => {
     windowsIdentity: windowsIdentity || "Current Windows session",
     selectedConnectionId: store.selectedConnectionId,
     connections: store.connections.map(sanitizeConnection)
+  });
+});
+
+app.get("/healthz", (_req, res) => {
+  res.json({
+    ok: true,
+    timestamp: new Date().toISOString()
   });
 });
 

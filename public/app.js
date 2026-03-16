@@ -44,6 +44,36 @@ const waitTypeNotes = {
   },
   IO_COMPLETION: {
     en: "General I/O completion wait. Investigate storage subsystem latency and file activity patterns."
+  },
+  PAGEIOLATCH_UP: {
+    en: "Update latch while waiting on a data page read from storage. Usually points to data file I/O latency."
+  },
+  PAGELATCH_EX: {
+    en: "In-memory page latch wait, not storage I/O. Common causes include allocation bitmap contention or hot pages in tempdb."
+  },
+  PAGELATCH_UP: {
+    en: "In-memory update latch wait. Often investigated for tempdb contention or allocation hotspots."
+  },
+  LOGBUFFER: {
+    en: "Waiting for log buffer access. Can appear with intense logging activity or log throughput pressure."
+  },
+  LCK_M_U: {
+    en: "Update lock wait. Usually indicates blocking between concurrent sessions trying to modify related rows."
+  },
+  LCK_M_IX: {
+    en: "Intent exclusive lock wait. Often part of broader blocking chains on write activity."
+  },
+  PREEMPTIVE_OS_AUTHENTICATIONOPS: {
+    en: "SQL Server is waiting on Windows authentication-related work outside the scheduler. Often appears with login or AD lookup latency."
+  },
+  BACKUPIO: {
+    en: "Backup or restore I/O wait. Indicates throughput or latency pressure on backup storage paths."
+  },
+  HADR_DATABASE_FLOW_CONTROL: {
+    en: "Availability Group flow control wait. Can indicate send or redo backpressure on replicas."
+  },
+  ASYNC_IO_COMPLETION: {
+    en: "Asynchronous I/O completion wait. Review subsystem latency and file access behavior."
   }
 };
 
@@ -243,17 +273,17 @@ function renderTopWaits(topWaits) {
   body.innerHTML = topWaits
     .map(
       (wait) => `
-        <tr>
+        <tr class="${Number(wait.wait_pct) >= 20 ? "row-hot" : ""}">
           <td>
             <button class="link-button" data-action="open-wait-type" data-wait-type="${escapeHtml(
-              wait.wait_type
+                wait.wait_type
             )}">
               ${escapeHtml(wait.wait_type)}
             </button>
           </td>
           <td>${tagCategory(wait.category)}</td>
-          <td class="align-right">${formatDuration(wait.wait_time_ms)}</td>
-          <td class="align-right">${formatDuration(wait.avg_wait_time_ms)}</td>
+          <td class="align-right nowrap">${formatDuration(wait.wait_time_ms)}</td>
+          <td class="align-right nowrap">${formatDuration(wait.avg_wait_time_ms)}</td>
           <td class="align-right">${formatNumber(wait.waiting_tasks_count)}</td>
           <td class="align-right">${wait.wait_pct}%</td>
         </tr>
@@ -274,7 +304,7 @@ function renderActiveWaits(activeWaits) {
     .slice(0, 12)
     .map(
       (wait) => `
-        <tr>
+        <tr class="${Number(wait.blocking_session_id) > 0 ? "row-blocked" : ""}">
           <td>${wait.session_id}</td>
           <td>
             <button class="link-button" data-action="open-wait-type" data-wait-type="${escapeHtml(
@@ -312,7 +342,7 @@ function renderLongRunningQueries(queries) {
   const body = document.getElementById("longRunningBody");
 
   if (!queries.length) {
-    body.innerHTML = `<tr><td colspan="5" class="empty">No query stats returned for this scope.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" class="empty">No query stats returned for this scope.</td></tr>`;
     return;
   }
 
@@ -321,9 +351,12 @@ function renderLongRunningQueries(queries) {
       (query) => `
         <tr>
           <td>${escapeHtml(query.database_name || "-")}</td>
+          <td class="nowrap">${formatDate(query.last_execution_time)}</td>
           <td class="align-right">${formatNumber(query.execution_count)}</td>
           <td class="align-right">${formatDuration(query.duration_time_avg_ms)}</td>
+          <td class="align-right">${formatDuration(query.cpu_time_avg_ms)}</td>
           <td class="align-right">${formatNumber(Math.round(Number(query.logical_reads_avg) || 0))}</td>
+          <td class="align-right">${formatNumber(Math.round(Number(query.logical_writes_avg) || 0))}</td>
           <td class="sql-text">
             <button class="link-button sql-text-button" data-action="open-query-text" data-sql-id="${escapeHtml(
               query.sql_id || ""
@@ -376,7 +409,7 @@ function renderBlockingSessions(rows) {
   body.innerHTML = rows
     .map(
       (row) => `
-        <tr>
+        <tr class="row-blocked">
           <td>${row.blocked_session_id}</td>
           <td>${row.blocking_session_id}</td>
           <td>${escapeHtml(row.database_name || "-")}</td>
