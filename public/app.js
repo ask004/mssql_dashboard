@@ -5,6 +5,48 @@ const palette = {
   Other: "#7487ff"
 };
 
+const waitTypeNotes = {
+  CXPACKET: {
+    en: "Parallel worker coordination wait. Often reviewed together with CXCONSUMER, MAXDOP, cost threshold, and skewed parallel plans."
+  },
+  CXCONSUMER: {
+    en: "Parallel consumer wait. Common in healthy parallel plans, but still useful when paired with high CXPACKET or CPU pressure."
+  },
+  SOS_SCHEDULER_YIELD: {
+    en: "CPU-bound work yielded the scheduler. Sustained high values usually indicate CPU pressure or expensive query plans."
+  },
+  PAGEIOLATCH_SH: {
+    en: "A read had to wait for a data page from storage. High values usually point to read I/O latency or poor buffer cache hit ratio."
+  },
+  PAGEIOLATCH_EX: {
+    en: "Exclusive page I/O wait. Can indicate storage latency on write-heavy or page-modifying activity."
+  },
+  WRITELOG: {
+    en: "Transaction log flush wait. Persistent dominance suggests log disk latency, excessive commit frequency, or heavy write workload."
+  },
+  ASYNC_NETWORK_IO: {
+    en: "SQL Server is waiting for the client to consume result rows. Often application-side row fetching is slow."
+  },
+  RESOURCE_SEMAPHORE: {
+    en: "Query memory grant wait. Usually caused by large sorts, hashes, spills, or insufficient memory for concurrent grants."
+  },
+  LCK_M_X: {
+    en: "Exclusive lock wait. Indicates blocking from concurrent writers or long transactions."
+  },
+  LCK_M_S: {
+    en: "Shared lock wait. Usually readers waiting behind writers or lock escalation and blocking chains."
+  },
+  THREADPOOL: {
+    en: "Worker thread starvation. High severity signal that requests are waiting for available workers."
+  },
+  HADR_SYNC_COMMIT: {
+    en: "Synchronous AG commit wait. Commit latency is impacted by secondary replica acknowledgment."
+  },
+  IO_COMPLETION: {
+    en: "General I/O completion wait. Investigate storage subsystem latency and file activity patterns."
+  }
+};
+
 const state = {
   selectedConnectionId: null,
   selectedDatabase: "",
@@ -74,6 +116,11 @@ function formatMegabytes(value) {
     return `${(mb / 1024).toFixed(2)} GB`;
   }
   return `${mb.toFixed(0)} MB`;
+}
+
+function getWaitTypeUrl(waitType) {
+  const slug = String(waitType || "").trim().toLowerCase();
+  return `https://www.sqlskills.com/help/waits/${encodeURIComponent(slug)}/`;
 }
 
 function formatDate(value) {
@@ -197,12 +244,18 @@ function renderTopWaits(topWaits) {
     .map(
       (wait) => `
         <tr>
-          <td>${escapeHtml(wait.wait_type)}</td>
+          <td>
+            <button class="link-button" data-action="open-wait-type" data-wait-type="${escapeHtml(
+              wait.wait_type
+            )}">
+              ${escapeHtml(wait.wait_type)}
+            </button>
+          </td>
           <td>${tagCategory(wait.category)}</td>
-          <td>${formatDuration(wait.wait_time_ms)}</td>
-          <td>${formatDuration(wait.avg_wait_time_ms)}</td>
-          <td>${formatNumber(wait.waiting_tasks_count)}</td>
-          <td>${wait.wait_pct}%</td>
+          <td class="align-right">${formatDuration(wait.wait_time_ms)}</td>
+          <td class="align-right">${formatDuration(wait.avg_wait_time_ms)}</td>
+          <td class="align-right">${formatNumber(wait.waiting_tasks_count)}</td>
+          <td class="align-right">${wait.wait_pct}%</td>
         </tr>
       `
     )
@@ -223,7 +276,13 @@ function renderActiveWaits(activeWaits) {
       (wait) => `
         <tr>
           <td>${wait.session_id}</td>
-          <td>${escapeHtml(wait.wait_type)}</td>
+          <td>
+            <button class="link-button" data-action="open-wait-type" data-wait-type="${escapeHtml(
+              wait.wait_type
+            )}">
+              ${escapeHtml(wait.wait_type)}
+            </button>
+          </td>
           <td>${tagCategory(wait.category)}</td>
           <td>${formatDuration(wait.wait_time)}</td>
           <td>${formatDuration(wait.cpu_time)}</td>
@@ -262,9 +321,9 @@ function renderLongRunningQueries(queries) {
       (query) => `
         <tr>
           <td>${escapeHtml(query.database_name || "-")}</td>
-          <td>${formatNumber(query.execution_count)}</td>
-          <td>${formatDuration(query.duration_time_avg_ms)}</td>
-          <td>${formatNumber(query.logical_reads_avg)}</td>
+          <td class="align-right">${formatNumber(query.execution_count)}</td>
+          <td class="align-right">${formatDuration(query.duration_time_avg_ms)}</td>
+          <td class="align-right">${formatNumber(Math.round(Number(query.logical_reads_avg) || 0))}</td>
           <td class="sql-text">
             <button class="link-button sql-text-button" data-action="open-query-text" data-sql-id="${escapeHtml(
               query.sql_id || ""
@@ -290,6 +349,20 @@ async function openQueryModal(sqlId) {
   } catch (error) {
     setText("queryModalBody", error.message);
   }
+}
+
+function openWaitModal(waitType) {
+  const modal = document.getElementById("waitModal");
+  const title = String(waitType || "").trim() || "Wait Detail";
+  const note = waitTypeNotes[title];
+  const link = getWaitTypeUrl(title);
+  const body = note
+    ? `${escapeHtml(note.en)}<br><br><a href="${link}" target="_blank" rel="noreferrer">${link}</a>`
+    : `<a href="${link}" target="_blank" rel="noreferrer">${link}</a>`;
+
+  setText("waitModalTitle", title);
+  document.getElementById("waitModalBody").innerHTML = body;
+  modal.showModal();
 }
 
 function renderBlockingSessions(rows) {
@@ -729,6 +802,10 @@ function bindEvents() {
     .getElementById("closeQueryModalButton")
     .addEventListener("click", () => document.getElementById("queryModal").close());
 
+  document
+    .getElementById("closeWaitModalButton")
+    .addEventListener("click", () => document.getElementById("waitModal").close());
+
   document.getElementById("longRunningBody").addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-action='open-query-text']");
     if (!button) {
@@ -736,6 +813,24 @@ function bindEvents() {
     }
 
     await openQueryModal(button.dataset.sqlId);
+  });
+
+  document.getElementById("topWaitsBody").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action='open-wait-type']");
+    if (!button) {
+      return;
+    }
+
+    openWaitModal(button.dataset.waitType);
+  });
+
+  document.getElementById("activeWaitsBody").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action='open-wait-type']");
+    if (!button) {
+      return;
+    }
+
+    openWaitModal(button.dataset.waitType);
   });
 
   document.getElementById("connectionList").addEventListener("click", async (event) => {

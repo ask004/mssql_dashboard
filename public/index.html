@@ -172,10 +172,10 @@
                   <tr>
                     <th>Wait Type</th>
                     <th>Category</th>
-                    <th>Total</th>
-                    <th>Avg / Task</th>
-                    <th>Tasks</th>
-                    <th>%</th>
+                    <th class="align-right">Total</th>
+                    <th class="align-right">Avg / Task</th>
+                    <th class="align-right">Tasks</th>
+                    <th class="align-right">%</th>
                   </tr>
                 </thead>
                 <tbody id="topWaitsBody"></tbody>
@@ -233,17 +233,17 @@
         <section class="single-panel">
           <article class="card panel">
             <div class="panel-header">
-              <h2>Long Running Queries</h2>
-              <span>Query stats ranked by average duration</span>
+              <h2>Expensive Queries</h2>
+              <span>Query stats ranked by average duration, execution count over 50</span>
             </div>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>Database</th>
-                    <th>Exec Count</th>
-                    <th>DurationTimeAvg</th>
-                    <th>LogicalReadsAvg</th>
+                    <th class="align-right">Exec Count</th>
+                    <th class="align-right">DurationTimeAvg</th>
+                    <th class="align-right">LogicalReadsAvg</th>
                     <th>Statement (50)</th>
                   </tr>
                 </thead>
@@ -379,6 +379,17 @@
         <button id="closeQueryModalButton" class="mini-button" type="button">Close</button>
       </div>
       <pre id="queryModalBody" class="query-modal-body"></pre>
+    </dialog>
+
+    <dialog id="waitModal" class="query-modal">
+      <div class="query-modal-head">
+        <div>
+          <span class="strip-label">Wait Type</span>
+          <strong id="waitModalTitle">Wait Detail</strong>
+        </div>
+        <button id="closeWaitModalButton" class="mini-button" type="button">Close</button>
+      </div>
+      <div id="waitModalBody" class="query-modal-body"></div>
     </dialog>
 
     <script src="/app.js"></script>

@@ -450,6 +450,10 @@ td {
   vertical-align: top;
 }
 
+.align-right {
+  text-align: right;
+}
+
 tbody tr:hover {
   background: rgba(255, 255, 255, 0.03);
 }
@@ -645,6 +649,10 @@ select option:hover {
   font-family: Consolas, "Courier New", monospace;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.query-modal-body a {
+  color: #9ed8ff;
 }
 
 .empty {

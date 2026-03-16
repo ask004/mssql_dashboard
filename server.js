@@ -272,6 +272,7 @@ const waitQuery = `
   CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
   CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) AS pa
   WHERE pa.attribute = 'dbid'
+    AND qs.execution_count > 50
     AND (@selectedDatabase IS NULL OR DB_NAME(CONVERT(int, pa.value)) = @selectedDatabase)
   ORDER BY duration_time_avg_ms DESC, logical_reads_avg DESC;
 
