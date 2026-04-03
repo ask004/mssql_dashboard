@@ -3,7 +3,6 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const sql = require("mssql");
-const sqlNative = require("mssql/msnodesqlv8");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -17,6 +16,12 @@ const windowsIdentity = [process.env.USERDOMAIN, process.env.USERNAME]
 const encryptionScope = "CurrentUser";
 const exposeSqlText =
   (process.env.EXPOSE_SQL_TEXT || "false").toLowerCase() === "true";
+const windowsOdbcDrivers = [
+  process.env.SQL_ODBC_DRIVER || "ODBC Driver 18 for SQL Server",
+  "ODBC Driver 17 for SQL Server",
+  "SQL Server Native Client 11.0"
+].filter((value, index, all) => value && all.indexOf(value) === index);
+let sqlNative = null;
 
 const excludedWaits = [
   "BROKER_EVENTHANDLER",
@@ -552,20 +557,7 @@ function validateConnectionInput(input) {
 
 function buildSqlConfig(connection) {
   if ((connection.authType || "sql") === "windows") {
-    const serverWithPort = connection.server.includes(",")
-      ? connection.server
-      : `${connection.server},${Number(connection.port || 1433)}`;
-
-    return {
-      server: serverWithPort,
-      database: "master",
-      driver: process.env.SQL_ODBC_DRIVER || "ODBC Driver 18 for SQL Server",
-      options: {
-        trustedConnection: true,
-        encrypt: Boolean(connection.encrypt),
-        trustServerCertificate: Boolean(connection.trustServerCertificate)
-      }
-    };
+    return buildWindowsSqlConfig(connection);
   }
 
   if (connection.connectionString) {
@@ -596,8 +588,161 @@ function buildSqlConfig(connection) {
   return config;
 }
 
+function getWindowsServerName(connection) {
+  const normalizedServer = String(connection.server || "").trim();
+  const normalizedPort = Number(connection.port || 1433);
+  const shouldAppendPort =
+    normalizedPort &&
+    normalizedPort !== 1433 &&
+    !normalizedServer.includes(",") &&
+    !normalizedServer.includes("\\");
+
+  return shouldAppendPort ? `${normalizedServer},${normalizedPort}` : normalizedServer;
+}
+
+function buildWindowsSqlConfig(connection, overrides = {}) {
+  getSqlNative();
+
+  const encrypt = Boolean(
+    overrides.encrypt !== undefined ? overrides.encrypt : connection.encrypt
+  );
+  const trustServerCertificate = Boolean(
+    overrides.trustServerCertificate !== undefined
+      ? overrides.trustServerCertificate
+      : connection.trustServerCertificate
+  );
+  const driver = overrides.driver || windowsOdbcDrivers[0];
+
+  const connectionString = [
+    `server=${getWindowsServerName(connection)}`,
+    "Database=master",
+    "Trusted_Connection=Yes",
+    `Driver=${driver}`,
+    `Encrypt=${encrypt ? "Yes" : "No"}`,
+    `TrustServerCertificate=${trustServerCertificate ? "Yes" : "No"}`
+  ].join(";");
+
+  return {
+    connectionString,
+    options: {
+      trustedConnection: true,
+      encrypt,
+      trustServerCertificate
+    }
+  };
+}
+
+function getWindowsSqlConfigAttempts(connection) {
+  const baseAttempts = [
+    {
+      label: "configured",
+      encrypt: Boolean(connection.encrypt),
+      trustServerCertificate: Boolean(connection.trustServerCertificate)
+    },
+    {
+      label: "encrypt+trust",
+      encrypt: true,
+      trustServerCertificate: true
+    },
+    {
+      label: "encrypt-only",
+      encrypt: true,
+      trustServerCertificate: false
+    },
+    {
+      label: "trust-only",
+      encrypt: false,
+      trustServerCertificate: true
+    }
+  ].filter((attempt, index, all) => {
+    return (
+      all.findIndex(
+        (item) =>
+          item.encrypt === attempt.encrypt &&
+          item.trustServerCertificate === attempt.trustServerCertificate
+      ) === index
+    );
+  });
+
+  return windowsOdbcDrivers.flatMap((driver) =>
+    baseAttempts.map((attempt) => ({
+      ...attempt,
+      driver,
+      label: `${attempt.label} via ${driver}`
+    }))
+  );
+}
+
+function extractErrorDetail(error) {
+  return (
+    error?.originalError?.info?.message ||
+    error?.originalError?.message ||
+    error?.precedingErrors?.map((item) => item.message).filter(Boolean).join(" | ") ||
+    error?.message ||
+    "Unknown connection error."
+  );
+}
+
+async function connectPool(connection) {
+  const sqlClient = getSqlClient(connection);
+
+  if ((connection.authType || "sql") !== "windows") {
+    const pool = new sqlClient.ConnectionPool(buildSqlConfig(connection));
+    await pool.connect();
+    return pool;
+  }
+
+  const attempts = getWindowsSqlConfigAttempts(connection);
+  let lastError = null;
+
+  for (const attempt of attempts) {
+    const sqlConfig = buildWindowsSqlConfig(connection, attempt);
+    const pool = new sqlClient.ConnectionPool(sqlConfig);
+
+    try {
+      console.info("Trying Windows-auth SQL connection:", {
+        server: connection.server,
+        port: connection.port,
+        driver: attempt.driver,
+        attempt: attempt.label,
+        encrypt: attempt.encrypt,
+        trustServerCertificate: attempt.trustServerCertificate
+      });
+      await pool.connect();
+      return pool;
+    } catch (error) {
+      lastError = error;
+      console.error("Windows-auth SQL connection attempt failed:", {
+        attempt: attempt.label,
+        detail: extractErrorDetail(error)
+      });
+      try {
+        await pool.close();
+      } catch (_closeError) {
+        // Ignore close errors from failed connect attempts.
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 function getSqlClient(connection) {
-  return (connection.authType || "sql") === "windows" ? sqlNative : sql;
+  return (connection.authType || "sql") === "windows" ? getSqlNative() : sql;
+}
+
+function getSqlNative() {
+  if (!sqlNative) {
+    try {
+      sqlNative = require("mssql/msnodesqlv8");
+    } catch (error) {
+      error.message =
+        "Windows Authentication driver could not be loaded. Install msnodesqlv8 and ODBC Driver 18 for SQL Server.";
+      throw error;
+    }
+  }
+
+  return sqlNative;
 }
 
 function categorizeWait(waitType = "") {
@@ -689,9 +834,13 @@ async function getPoolForConnection(connection) {
   const key = liveConnection.id;
 
   if (!poolCache.has(key)) {
-    const sqlClient = getSqlClient(liveConnection);
-    const pool = new sqlClient.ConnectionPool(buildSqlConfig(liveConnection));
-    poolCache.set(key, pool.connect());
+    poolCache.set(
+      key,
+      connectPool(liveConnection).catch((error) => {
+        poolCache.delete(key);
+        throw error;
+      })
+    );
   }
 
   return poolCache.get(key);
@@ -995,11 +1144,10 @@ app.post("/api/connections/test", async (req, res) => {
     connectionString: String(req.body.connectionString || "").trim()
   };
 
-  const sqlClient = getSqlClient(probeConnection);
-  const pool = new sqlClient.ConnectionPool(buildSqlConfig(probeConnection));
+  let pool;
 
   try {
-    await pool.connect();
+    pool = await connectPool(probeConnection);
     const result = await pool
       .request()
       .query("SELECT @@SERVERNAME AS server_name, DB_NAME() AS database_name");
@@ -1010,12 +1158,24 @@ app.post("/api/connections/test", async (req, res) => {
       databaseName: result.recordset[0]?.database_name || "master"
     });
   } catch (testError) {
+    const detail = extractErrorDetail(testError);
+
+    console.error("Connection test failed:", {
+      name: testError?.name,
+      code: testError?.code,
+      message: testError?.message,
+      detail
+    });
+
     res.status(400).json({
       ok: false,
-      error: "Connection test failed."
+      error: "Connection test failed.",
+      detail
     });
   } finally {
-    await pool.close();
+    if (pool) {
+      await pool.close();
+    }
   }
 });
 
